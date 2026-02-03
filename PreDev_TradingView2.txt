@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("Prev Day H/L + Bias + US Session (Yesterday NY, 15m)", overlay=true, max_lines_count=80, max_labels_count=80)
 
 //──────── Inputs ────────
@@ -28,10 +28,28 @@ ema200Len  = input.int(200,"EMA 200 Length",minval=1)
 
 // ───── Scenario/Bias control ─────
 useBiasInScenario = input.bool(true, "Use Bias filter in Scenario (EMA + Bias must align)")
-scenarioBg = input.color(color.new(color.black, 0), "Scenario label background")
-scenarioTx = input.color(color.white, "Scenario label text")
 
-//──────── DAILY truth for Prev Day levels & Bias ────────
+// ───── Fixed Corner Panel (Signal HUD) ─────
+showCornerPanel = input.bool(true, "Show Fixed Corner Panel (Signal HUD)")
+panelCorner = input.string("TOP_RIGHT", "Panel Corner", options=["TOP_LEFT","TOP_RIGHT","BOTTOM_LEFT","BOTTOM_RIGHT"])
+
+// این مقدار هرچی بیشتر باشه پنل بیشتر به چپ هل داده میشه (برای اینکه زیر آیکون‌ها نره)
+panelPadSpaces = input.int(18, "Panel Left Padding (spaces)", minval=0, maxval=60)
+
+panelText   = input.color(color.white, "Panel Text")
+
+// ───── Divergence Inputs (INFO ONLY) ─────
+divTF      = input.string("15", "Divergence TF", options=["", "15", "5", "60", "D"])
+rsiLen     = input.int(14, "RSI Length", minval=2)
+macdFast   = input.int(12, "MACD Fast", minval=1)
+macdSlow   = input.int(26, "MACD Slow", minval=1)
+macdSig    = input.int(9,  "MACD Signal", minval=1)
+pL         = input.int(5, "Pivot Left", minval=1)
+pR         = input.int(5, "Pivot Right", minval=1)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DAILY truth for Prev Day levels & Bias
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 pdh = request.security(syminfo.tickerid, "D", high[1],  barmerge.gaps_off, barmerge.lookahead_off)
 pdl = request.security(syminfo.tickerid, "D", low[1],   barmerge.gaps_off, barmerge.lookahead_off)
 c1  = request.security(syminfo.tickerid, "D", close[1], barmerge.gaps_off, barmerge.lookahead_off)
@@ -39,14 +57,15 @@ c1  = request.security(syminfo.tickerid, "D", close[1], barmerge.gaps_off, barme
 h2  = request.security(syminfo.tickerid, "D", high[2],  barmerge.gaps_off, barmerge.lookahead_off)
 l2  = request.security(syminfo.tickerid, "D", low[2],   barmerge.gaps_off, barmerge.lookahead_off)
 
-bias = c1 > h2 ? "Bias: LONG" : c1 < l2 ? "Bias: SHORT" : "Bias: INSIDE"
-
-// Bias flags for logic
 biasLong  = c1 > h2
 biasShort = c1 < l2
 biasInside= not biasLong and not biasShort
 
-// ───── EMA 20/50/200 calculated on 15m and shown on all TFs ─────
+bias = biasLong ? "Bias: LONG" : biasShort ? "Bias: SHORT" : "Bias: INSIDE"
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EMA 20/50/200 from 15m (shown on all TFs)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ema20_15  = request.security(syminfo.tickerid, "15", ta.ema(close, ema20Len),  barmerge.gaps_off, barmerge.lookahead_off)
 ema50_15  = request.security(syminfo.tickerid, "15", ta.ema(close, ema50Len),  barmerge.gaps_off, barmerge.lookahead_off)
 ema200_15 = request.security(syminfo.tickerid, "15", ta.ema(close, ema200Len), barmerge.gaps_off, barmerge.lookahead_off)
@@ -55,11 +74,10 @@ plot(showEMAs ? ema20_15  : na, title="EMA 20 (15m)",  linewidth=1)
 plot(showEMAs ? ema50_15  : na, title="EMA 50 (15m)",  linewidth=1)
 plot(showEMAs ? ema200_15 : na, title="EMA 200 (15m)", linewidth=1)
 
-// ───── EMA-only scenario base ─────
+// Scenario base
 emaLong  = close > ema200_15 and ema20_15 > ema50_15
 emaShort = close < ema200_15 and ema20_15 < ema50_15
 
-// ───── Final scenario (optionally filtered by Bias) ─────
 finalLong  = useBiasInScenario ? (emaLong  and biasLong)  : emaLong
 finalShort = useBiasInScenario ? (emaShort and biasShort) : emaShort
 
@@ -68,7 +86,9 @@ scenario =
      finalShort ? "Scenario: SHORT" :
                   "Scenario: NEUTRAL"
 
-//──────── Blue lines (Prev Day High/Low) ────────
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Blue lines: Prev Day High/Low (D[1])
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 var line linePDH = na
 var line linePDL = na
 
@@ -112,33 +132,21 @@ if barstate.islast
         if not na(labPDL)
             label.delete(labPDL), labPDL := na
 
-// ───── Scenario label (shown near last bar) ─────
-var label labScenario = na
-if barstate.islast
-    txtS = scenario + " | " + bias + (useBiasInScenario ? " | BiasFilter: ON" : " | BiasFilter: OFF")
-    yPos = close
-    if na(labScenario)
-        labScenario := label.new(bar_index, yPos, txtS, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=scenarioBg, textcolor=scenarioTx, size=size.small)
-    else
-        label.set_x(labScenario, bar_index), label.set_y(labScenario, yPos), label.set_text(labScenario, txtS)
-
-
-//──────── US Session (YESTERDAY NY) computed on 15m ────────
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// US Session (YESTERDAY NY) computed on 15m
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 sessTF = "15"
 
-// date-id in NY
 f_date_id(_t) =>
     int y = year(_t, usTZ)
     int m = month(_t, usTZ)
     int d = dayofmonth(_t, usTZ)
     y*10000 + m*100 + d
 
-// Target: Yesterday in NY (NOT Daily[1], to avoid Forex daily roll issues)
 nyMidnightToday = timestamp(usTZ, year(time, usTZ), month(time, usTZ), dayofmonth(time, usTZ), 0, 0)
 nyMidnightYest  = nyMidnightToday - 24*60*60*1000
 targetNYDateId  = f_date_id(nyMidnightYest)
 
-// Build one-session snapshot on sessTF
 f_build_session() =>
     bool inSess = not na(time(timeframe.period, usSession, usTZ))
     bool sStart = inSess and not inSess[1]
@@ -174,15 +182,13 @@ f_build_session() =>
         outL := l
         outC := c
         outD := did
-
         o := na, h := na, l := na, c := na, did := na
 
     [outO, outH, outL, outC, outD]
 
-// pull snapshots
 [sO, sH, sL, sC, sD] = request.security(syminfo.tickerid, sessTF, f_build_session(), barmerge.gaps_off, barmerge.lookahead_off)
 
-// store last 6 completed sessions (weekend safe)
+// store last 6 completed sessions
 var float sessO1=na
 var float sessH1=na
 var float sessL1=na
@@ -222,7 +228,6 @@ if not na(sD)
     sessO2:=sessO1, sessH2:=sessH1, sessL2:=sessL1, sessC2:=sessC1, sessD2:=sessD1
     sessO1:=sO,     sessH1:=sH,     sessL1:=sL,     sessC1:=sC,     sessD1:=sD
 
-// match target date-id (yesterday NY)
 float usO = na
 float usH = na
 float usL = na
@@ -242,7 +247,6 @@ else if sessD5 == targetNYDateId
 else if sessD6 == targetNYDateId
     usO:=sessO6, usH:=sessH6, usL:=sessL6, usC:=sessC6, matched:=true
 
-// Draw lines — IMPORTANT: do NOT delete on temporary mismatch (prevents flashing)
 var line lineUSH = na
 var line lineUSL = na
 var line lineUSO = na
@@ -269,7 +273,6 @@ if showUSSession and matched
     else
         line.set_y1(lineUSC, usC), line.set_y2(lineUSC, usC)
 
-// Only delete when user disables the feature
 if not showUSSession
     if not na(lineUSH)
         line.delete(lineUSH), lineUSH := na
@@ -279,3 +282,219 @@ if not showUSSession
         line.delete(lineUSO), lineUSO := na
     if not na(lineUSC)
         line.delete(lineUSC), lineUSC := na
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FIXED CORNER PANEL: Signal + Zone + Score + واگرایی RSI/MACD
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_pos(_c) =>
+    switch _c
+        "TOP_LEFT"     => position.top_left
+        "TOP_RIGHT"    => position.top_right
+        "BOTTOM_LEFT"  => position.bottom_left
+        => position.bottom_right
+
+useTf = divTF == "" ? timeframe.period : divTF
+
+f_div_signals() =>
+    r = ta.rsi(close, rsiLen)
+    [macdLine, signalLine, hist] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+    pl_price = ta.pivotlow(low,  pL, pR)
+    ph_price = ta.pivothigh(high, pL, pR)
+
+    pl_rsi = ta.pivotlow(r,  pL, pR)
+    ph_rsi = ta.pivothigh(r, pL, pR)
+
+    pl_macd = ta.pivotlow(hist,  pL, pR)
+    ph_macd = ta.pivothigh(hist, pL, pR)
+
+    var float prevPL_price = na
+    var float lastPL_price = na
+    var float prevPH_price = na
+    var float lastPH_price = na
+
+    var float prevPL_rsi = na
+    var float lastPL_rsi = na
+    var float prevPH_rsi = na
+    var float lastPH_rsi = na
+
+    var float prevPL_macd = na
+    var float lastPL_macd = na
+    var float prevPH_macd = na
+    var float lastPH_macd = na
+
+    bool rsiBull = false, rsiBear = false
+    bool macdBull = false, macdBear = false
+
+    if not na(pl_price) and not na(pl_rsi)
+        prevPL_price := lastPL_price
+        lastPL_price := pl_price
+        prevPL_rsi   := lastPL_rsi
+        lastPL_rsi   := pl_rsi
+        rsiBull := not na(prevPL_price) and lastPL_price < prevPL_price and lastPL_rsi > prevPL_rsi
+
+    if not na(ph_price) and not na(ph_rsi)
+        prevPH_price := lastPH_price
+        lastPH_price := ph_price
+        prevPH_rsi   := lastPH_rsi
+        lastPH_rsi   := ph_rsi
+        rsiBear := not na(prevPH_price) and lastPH_price > prevPH_price and lastPH_rsi < prevPH_rsi
+
+    if not na(pl_price) and not na(pl_macd)
+        prevPL_price := lastPL_price
+        lastPL_price := pl_price
+        prevPL_macd  := lastPL_macd
+        lastPL_macd  := pl_macd
+        macdBull := not na(prevPL_price) and lastPL_price < prevPL_price and lastPL_macd > prevPL_macd
+
+    if not na(ph_price) and not na(ph_macd)
+        prevPH_price := lastPH_price
+        lastPH_price := ph_price
+        prevPH_macd  := lastPH_macd
+        lastPH_macd  := ph_macd
+        macdBear := not na(prevPH_price) and lastPH_price > prevPH_price and lastPH_macd < prevPH_macd
+
+    [rsiBull, rsiBear, macdBull, macdBear]
+
+[rsiBullSig, rsiBearSig, macdBullSig, macdBearSig] =  request.security(syminfo.tickerid, useTf, f_div_signals(), barmerge.gaps_off, barmerge.lookahead_off)
+// ───── Divergence strength (Weak / Strong) ─────
+rsiSeries  = request.security(syminfo.tickerid, useTf, ta.rsi(close, rsiLen), barmerge.gaps_off, barmerge.lookahead_off)
+
+f_macd_hist() =>
+    [m, s, h] = ta.macd(close, macdFast, macdSlow, macdSig)
+    h
+
+macdHist_sec = request.security(
+     syminfo.tickerid,
+     useTf,
+     f_macd_hist(),
+     barmerge.gaps_off,
+     barmerge.lookahead_off
+)
+
+// ساده و کاربردی:
+// صعودی قوی وقتی RSI در ناحیه پایین‌تر (زیر 40) بوده
+// نزولی قوی وقتی RSI در ناحیه بالاتر (بالای 60) بوده
+rsiLowWin  = ta.lowest(rsiSeries, pL + pR)
+rsiHighWin = ta.highest(rsiSeries, pL + pR)
+
+rsiBullStrong = rsiBullSig and rsiLowWin < 40
+rsiBearStrong = rsiBearSig and rsiHighWin > 60
+
+
+// برای MACD فعلاً Strong = همان وجود واگرایی
+macdBullStrong = macdBullSig
+macdBearStrong = macdBearSig
+
+
+// // واگرایی: فقط “دارد/ندارد” + جهت (صعودی/نزولی)
+// var string rsiDivText  = "واگرایی RSI: ندارد"
+// var string macdDivText = "واگرایی MACD: ندارد"
+
+// if rsiBullSig
+//     rsiDivText := "واگرایی RSI: دارد (صعودی)"
+// else if rsiBearSig
+//     rsiDivText := "واگرایی RSI: دارد (نزولی)"
+
+// if macdBullSig
+//     macdDivText := "واگرایی MACD: دارد (صعودی)"
+// else if macdBearSig
+//     macdDivText := "واگرایی MACD: دارد (نزولی)"
+
+// rsiDiv  = rsiBullSig or rsiBearSig
+// macdDiv = macdBullSig or macdBearSig
+// واگرایی: فقط “دارد/ندارد” + جهت (صعودی/نزولی) — با تاریخ انقضا (تا قدیمی نماند)
+divLookbackBars = 80
+
+var int rsiLastDivBar  = na
+var int macdLastDivBar = na
+var string rsiLastDir  = ""
+var string macdLastDir = ""
+var string rsiLastStrength  = ""
+var string macdLastStrength = ""
+
+if rsiBullSig
+    rsiLastDivBar := bar_index
+    rsiLastDir := "صعودی"
+    rsiLastStrength := rsiBullStrong ? "قوی" : "ضعیف"
+else if rsiBearSig
+    rsiLastDivBar := bar_index
+    rsiLastDir := "نزولی"
+    rsiLastStrength := rsiBearStrong ? "قوی" : "ضعیف"
+
+
+if macdBullSig
+    macdLastDivBar := bar_index
+    macdLastDir := "صعودی"
+    macdLastStrength := macdBullStrong ? "قوی" : "ضعیف"
+else if macdBearSig
+    macdLastDivBar := bar_index
+    macdLastDir := "نزولی"
+    macdLastStrength := macdBearStrong ? "قوی" : "ضعیف"
+
+
+rsiHasRecent  = not na(rsiLastDivBar)  and (bar_index - rsiLastDivBar)  <= divLookbackBars
+macdHasRecent = not na(macdLastDivBar) and (bar_index - macdLastDivBar) <= divLookbackBars
+
+rsiDivText  = rsiHasRecent  ? ("واگرایی RSI: دارد ("  + rsiLastDir  + " - " + rsiLastStrength  + ")") : "واگرایی RSI: ندارد"
+macdDivText = macdHasRecent ? ("واگرایی MACD: دارد (" + macdLastDir + " - " + macdLastStrength + ")") : "واگرایی MACD: ندارد"
+
+rsiDiv  = rsiHasRecent
+macdDiv = macdHasRecent
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SIGNAL + SCORE + ZONE
+// Score (0..5):
+// 1) Scenario is LONG/SHORT (not neutral)
+// 2) Bias is LONG/SHORT (not inside)
+// 3) Scenario aligns with Bias (if bias filter is ON) OR at least scenario exists (if OFF)
+// 4) RSI divergence exists
+// 5) MACD divergence exists
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+scenarioOk = finalLong or finalShort
+biasOk     = biasLong or biasShort
+alignOk    = useBiasInScenario ? ((finalLong and biasLong) or (finalShort and biasShort)) : scenarioOk
+
+score = 0
+score += scenarioOk ? 1 : 0
+score += biasOk ? 1 : 0
+score += alignOk ? 1 : 0
+score += rsiDiv ? 1 : 0
+score += macdDiv ? 1 : 0
+
+signal =
+     finalLong  ? "SIGNAL: LONG" :
+     finalShort ? "SIGNAL: SHORT" :
+                  "SIGNAL: WAIT"
+
+zoneText = score >= 4 ? "🔥 High Probability Zone" : score >= 2 ? "⚠️ Conflict Zone" : "⛔ No Setup"
+
+// Panel color by zone
+panelBg =
+     score >= 4 ? color.new(color.green, 0) :
+     score >= 2 ? color.new(color.yellow, 0) :
+                  color.new(color.red, 0)
+
+// Padding to push panel left (avoid icons)
+pad = str.repeat(" ", panelPadSpaces)
+
+// One fixed table panel (2 columns: left is padding, right is content)
+var table panel = na
+if showCornerPanel and na(panel)
+    panel := table.new(f_pos(panelCorner), 2, 1, frame_color=color.new(color.white, 80), border_color=color.new(color.white, 80))
+
+if barstate.islast
+    if showCornerPanel
+        table.cell(panel, 0, 0, pad, text_color=color.new(color.white, 100), bgcolor=color.new(color.black, 100))
+        txt =
+             signal + "\n" +
+             scenario + " | " + bias + (useBiasInScenario ? " | BiasFilter: ON" : " | BiasFilter: OFF") + "\n" +
+             zoneText + " | Score: " + str.tostring(score) + "/5\n\n" +
+             "Divergence (" + useTf + ")\n" +
+             rsiDivText + "\n" +
+             macdDivText
+        table.cell(panel, 1, 0, txt, text_color=panelText, bgcolor=panelBg, text_size=size.small)
+    else
+        if not na(panel)
+            table.delete(panel)
+            panel := na
