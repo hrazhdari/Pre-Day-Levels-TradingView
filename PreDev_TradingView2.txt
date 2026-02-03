@@ -1,0 +1,281 @@
+//@version=5
+indicator("Prev Day H/L + Bias + US Session (Yesterday NY, 15m)", overlay=true, max_lines_count=80, max_labels_count=80)
+
+//──────── Inputs ────────
+showPrevHL      = input.bool(true,  "Show Prev Day High/Low (Blue)")
+showBiasLabels  = input.bool(true,  "Show Bias Labels on Blue Lines")
+showUSSession   = input.bool(true,  "Show US Session Levels for YESTERDAY (NY), calc on 15m")
+
+usSession       = input.session("0930-1600", "US Session (NY time)")
+usTZ            = input.string("America/New_York", "US Session Timezone")
+
+blueW  = input.int(2, "Blue width",  minval=1, maxval=5)
+greenW = input.int(2, "Green width", minval=1, maxval=5)
+pinkW  = input.int(1, "Pink width",  minval=1, maxval=5)
+
+blueColor  = input.color(color.new(color.blue, 0), "Blue (Prev H/L)")
+greenColor = input.color(color.new(color.green, 0), "Green (US Sess H/L)")
+pinkColor  = input.color(color.new(color.fuchsia, 75), "Pink (US Sess O/C)")
+
+labelBg   = input.color(color.new(color.black, 0), "Label background")
+labelText = input.color(color.white, "Label text")
+
+// ───── EMA Inputs (15m) ─────
+showEMAs   = input.bool(true, "Show EMAs (20/50/200) from 15m")
+ema20Len   = input.int(20, "EMA 20 Length", minval=1)
+ema50Len   = input.int(50, "EMA 50 Length", minval=1)
+ema200Len  = input.int(200,"EMA 200 Length",minval=1)
+
+// ───── Scenario/Bias control ─────
+useBiasInScenario = input.bool(true, "Use Bias filter in Scenario (EMA + Bias must align)")
+scenarioBg = input.color(color.new(color.black, 0), "Scenario label background")
+scenarioTx = input.color(color.white, "Scenario label text")
+
+//──────── DAILY truth for Prev Day levels & Bias ────────
+pdh = request.security(syminfo.tickerid, "D", high[1],  barmerge.gaps_off, barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1],   barmerge.gaps_off, barmerge.lookahead_off)
+c1  = request.security(syminfo.tickerid, "D", close[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+h2  = request.security(syminfo.tickerid, "D", high[2],  barmerge.gaps_off, barmerge.lookahead_off)
+l2  = request.security(syminfo.tickerid, "D", low[2],   barmerge.gaps_off, barmerge.lookahead_off)
+
+bias = c1 > h2 ? "Bias: LONG" : c1 < l2 ? "Bias: SHORT" : "Bias: INSIDE"
+
+// Bias flags for logic
+biasLong  = c1 > h2
+biasShort = c1 < l2
+biasInside= not biasLong and not biasShort
+
+// ───── EMA 20/50/200 calculated on 15m and shown on all TFs ─────
+ema20_15  = request.security(syminfo.tickerid, "15", ta.ema(close, ema20Len),  barmerge.gaps_off, barmerge.lookahead_off)
+ema50_15  = request.security(syminfo.tickerid, "15", ta.ema(close, ema50Len),  barmerge.gaps_off, barmerge.lookahead_off)
+ema200_15 = request.security(syminfo.tickerid, "15", ta.ema(close, ema200Len), barmerge.gaps_off, barmerge.lookahead_off)
+
+plot(showEMAs ? ema20_15  : na, title="EMA 20 (15m)",  linewidth=1)
+plot(showEMAs ? ema50_15  : na, title="EMA 50 (15m)",  linewidth=1)
+plot(showEMAs ? ema200_15 : na, title="EMA 200 (15m)", linewidth=1)
+
+// ───── EMA-only scenario base ─────
+emaLong  = close > ema200_15 and ema20_15 > ema50_15
+emaShort = close < ema200_15 and ema20_15 < ema50_15
+
+// ───── Final scenario (optionally filtered by Bias) ─────
+finalLong  = useBiasInScenario ? (emaLong  and biasLong)  : emaLong
+finalShort = useBiasInScenario ? (emaShort and biasShort) : emaShort
+
+scenario =
+     finalLong  ? "Scenario: LONG" :
+     finalShort ? "Scenario: SHORT" :
+                  "Scenario: NEUTRAL"
+
+//──────── Blue lines (Prev Day High/Low) ────────
+var line linePDH = na
+var line linePDL = na
+
+if showPrevHL
+    if na(linePDH)
+        linePDH := line.new(bar_index, pdh, bar_index+1, pdh, extend=extend.right, color=blueColor, width=blueW)
+    else
+        line.set_y1(linePDH, pdh), line.set_y2(linePDH, pdh)
+
+    if na(linePDL)
+        linePDL := line.new(bar_index, pdl, bar_index+1, pdl, extend=extend.right, color=blueColor, width=blueW)
+    else
+        line.set_y1(linePDL, pdl), line.set_y2(linePDL, pdl)
+else
+    if not na(linePDH)
+        line.delete(linePDH), linePDH := na
+    if not na(linePDL)
+        line.delete(linePDL), linePDL := na
+
+// Bias labels on blue lines
+var label labPDH = na
+var label labPDL = na
+
+if barstate.islast
+    if showPrevHL and showBiasLabels
+        txtH = "PDH: " + str.tostring(pdh, format.mintick) + " | " + bias
+        txtL = "PDL: " + str.tostring(pdl, format.mintick) + " | " + bias
+
+        if na(labPDH)
+            labPDH := label.new(bar_index, pdh, txtH, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=labelBg, textcolor=labelText, size=size.small)
+        else
+            label.set_x(labPDH, bar_index), label.set_y(labPDH, pdh), label.set_text(labPDH, txtH)
+
+        if na(labPDL)
+            labPDL := label.new(bar_index, pdl, txtL, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=labelBg, textcolor=labelText, size=size.small)
+        else
+            label.set_x(labPDL, bar_index), label.set_y(labPDL, pdl), label.set_text(labPDL, txtL)
+    else
+        if not na(labPDH)
+            label.delete(labPDH), labPDH := na
+        if not na(labPDL)
+            label.delete(labPDL), labPDL := na
+
+// ───── Scenario label (shown near last bar) ─────
+var label labScenario = na
+if barstate.islast
+    txtS = scenario + " | " + bias + (useBiasInScenario ? " | BiasFilter: ON" : " | BiasFilter: OFF")
+    yPos = close
+    if na(labScenario)
+        labScenario := label.new(bar_index, yPos, txtS, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=scenarioBg, textcolor=scenarioTx, size=size.small)
+    else
+        label.set_x(labScenario, bar_index), label.set_y(labScenario, yPos), label.set_text(labScenario, txtS)
+
+
+//──────── US Session (YESTERDAY NY) computed on 15m ────────
+sessTF = "15"
+
+// date-id in NY
+f_date_id(_t) =>
+    int y = year(_t, usTZ)
+    int m = month(_t, usTZ)
+    int d = dayofmonth(_t, usTZ)
+    y*10000 + m*100 + d
+
+// Target: Yesterday in NY (NOT Daily[1], to avoid Forex daily roll issues)
+nyMidnightToday = timestamp(usTZ, year(time, usTZ), month(time, usTZ), dayofmonth(time, usTZ), 0, 0)
+nyMidnightYest  = nyMidnightToday - 24*60*60*1000
+targetNYDateId  = f_date_id(nyMidnightYest)
+
+// Build one-session snapshot on sessTF
+f_build_session() =>
+    bool inSess = not na(time(timeframe.period, usSession, usTZ))
+    bool sStart = inSess and not inSess[1]
+    bool sEnd   = not inSess and inSess[1]
+
+    var float o = na
+    var float h = na
+    var float l = na
+    var float c = na
+    var int   did = na
+
+    float outO = na
+    float outH = na
+    float outL = na
+    float outC = na
+    int   outD = na
+
+    if sStart
+        o := open
+        h := high
+        l := low
+        c := close
+        did := f_date_id(time)
+
+    if inSess
+        h := na(h) ? high : math.max(h, high)
+        l := na(l) ? low  : math.min(l, low)
+        c := close
+
+    if sEnd
+        outO := o
+        outH := h
+        outL := l
+        outC := c
+        outD := did
+
+        o := na, h := na, l := na, c := na, did := na
+
+    [outO, outH, outL, outC, outD]
+
+// pull snapshots
+[sO, sH, sL, sC, sD] = request.security(syminfo.tickerid, sessTF, f_build_session(), barmerge.gaps_off, barmerge.lookahead_off)
+
+// store last 6 completed sessions (weekend safe)
+var float sessO1=na
+var float sessH1=na
+var float sessL1=na
+var float sessC1=na
+var int   sessD1=na
+var float sessO2=na
+var float sessH2=na
+var float sessL2=na
+var float sessC2=na
+var int   sessD2=na
+var float sessO3=na
+var float sessH3=na
+var float sessL3=na
+var float sessC3=na
+var int   sessD3=na
+var float sessO4=na
+var float sessH4=na
+var float sessL4=na
+var float sessC4=na
+var int   sessD4=na
+var float sessO5=na
+var float sessH5=na
+var float sessL5=na
+var float sessC5=na
+var int   sessD5=na
+var float sessO6=na
+var float sessH6=na
+var float sessL6=na
+var float sessC6=na
+var int   sessD6=na
+
+if not na(sD)
+    sessO6:=sessO5, sessH6:=sessH5, sessL6:=sessL5, sessC6:=sessC5, sessD6:=sessD5
+    sessO5:=sessO4, sessH5:=sessH4, sessL5:=sessL4, sessC5:=sessC4, sessD5:=sessD4
+    sessO4:=sessO3, sessH4:=sessH3, sessL4:=sessL3, sessC4:=sessC3, sessD4:=sessD3
+    sessO3:=sessO2, sessH3:=sessH2, sessL3:=sessL2, sessC3:=sessC2, sessD3:=sessD2
+    sessO2:=sessO1, sessH2:=sessH1, sessL2:=sessL1, sessC2:=sessC1, sessD2:=sessD1
+    sessO1:=sO,     sessH1:=sH,     sessL1:=sL,     sessC1:=sC,     sessD1:=sD
+
+// match target date-id (yesterday NY)
+float usO = na
+float usH = na
+float usL = na
+float usC = na
+bool  matched = false
+
+if sessD1 == targetNYDateId
+    usO:=sessO1, usH:=sessH1, usL:=sessL1, usC:=sessC1, matched:=true
+else if sessD2 == targetNYDateId
+    usO:=sessO2, usH:=sessH2, usL:=sessL2, usC:=sessC2, matched:=true
+else if sessD3 == targetNYDateId
+    usO:=sessO3, usH:=sessH3, usL:=sessL3, usC:=sessC3, matched:=true
+else if sessD4 == targetNYDateId
+    usO:=sessO4, usH:=sessH4, usL:=sessL4, usC:=sessC4, matched:=true
+else if sessD5 == targetNYDateId
+    usO:=sessO5, usH:=sessH5, usL:=sessL5, usC:=sessC5, matched:=true
+else if sessD6 == targetNYDateId
+    usO:=sessO6, usH:=sessH6, usL:=sessL6, usC:=sessC6, matched:=true
+
+// Draw lines — IMPORTANT: do NOT delete on temporary mismatch (prevents flashing)
+var line lineUSH = na
+var line lineUSL = na
+var line lineUSO = na
+var line lineUSC = na
+
+if showUSSession and matched
+    if na(lineUSH)
+        lineUSH := line.new(bar_index, usH, bar_index+1, usH, extend=extend.right, color=greenColor, width=greenW)
+    else
+        line.set_y1(lineUSH, usH), line.set_y2(lineUSH, usH)
+
+    if na(lineUSL)
+        lineUSL := line.new(bar_index, usL, bar_index+1, usL, extend=extend.right, color=greenColor, width=greenW)
+    else
+        line.set_y1(lineUSL, usL), line.set_y2(lineUSL, usL)
+
+    if na(lineUSO)
+        lineUSO := line.new(bar_index, usO, bar_index+1, usO, extend=extend.right, color=pinkColor, width=pinkW)
+    else
+        line.set_y1(lineUSO, usO), line.set_y2(lineUSO, usO)
+
+    if na(lineUSC)
+        lineUSC := line.new(bar_index, usC, bar_index+1, usC, extend=extend.right, color=pinkColor, width=pinkW)
+    else
+        line.set_y1(lineUSC, usC), line.set_y2(lineUSC, usC)
+
+// Only delete when user disables the feature
+if not showUSSession
+    if not na(lineUSH)
+        line.delete(lineUSH), lineUSH := na
+    if not na(lineUSL)
+        line.delete(lineUSL), lineUSL := na
+    if not na(lineUSO)
+        line.delete(lineUSO), lineUSO := na
+    if not na(lineUSC)
+        line.delete(lineUSC), lineUSC := na
